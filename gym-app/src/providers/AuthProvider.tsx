@@ -6,7 +6,7 @@ import { Platform } from 'react-native';
 import { fetchProfile } from '@/lib/api';
 import { extractAuthCode } from '@/lib/authLinks';
 import type { Profile } from '@/lib/database.types';
-import { supabase } from '@/lib/supabase';
+import { clearPasswordRecovery, isPasswordRecoveryPending, supabase } from '@/lib/supabase';
 
 type AuthStatus =
   | 'loading' // restoring the session or loading the profile
@@ -41,8 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
       setSessionLoaded(true);
-      if (event === 'PASSWORD_RECOVERY') setIsRecovering(true);
+      // The recovery signal may have fired before this component mounted; see supabase.ts.
       if (event === 'SIGNED_OUT') setIsRecovering(false);
+      else setIsRecovering(event === 'PASSWORD_RECOVERY' || isPasswordRecoveryPending());
     });
     return () => data.subscription.unsubscribe();
   }, []);
@@ -90,7 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) await supabase.auth.signOut({ scope: 'local' });
   }, []);
 
-  const finishRecovery = useCallback(() => setIsRecovering(false), []);
+  const finishRecovery = useCallback(() => {
+    clearPasswordRecovery();
+    setIsRecovering(false);
+  }, []);
 
   const value = useMemo<AuthState>(() => {
     const current = loaded && loaded.userId === userId ? loaded : null;

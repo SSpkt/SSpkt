@@ -62,6 +62,20 @@ export const supabase = createClient<Database>(
   },
 );
 
+// The client starts exchanging an emailed reset link the moment it is created, which can
+// finish before React has mounted anything. Listening from here, synchronously, is the only
+// way to be sure the "this sign-in is a password recovery" signal is never missed.
+let passwordRecoveryPending = false;
+supabase.auth.onAuthStateChange((event) => {
+  if (event === 'PASSWORD_RECOVERY') passwordRecoveryPending = true;
+  if (event === 'SIGNED_OUT') passwordRecoveryPending = false;
+});
+
+export const isPasswordRecoveryPending = () => passwordRecoveryPending;
+export const clearPasswordRecovery = () => {
+  passwordRecoveryPending = false;
+};
+
 if (Platform.OS !== 'web') {
   AppState.addEventListener('change', (state) => {
     if (state === 'active') supabase.auth.startAutoRefresh();

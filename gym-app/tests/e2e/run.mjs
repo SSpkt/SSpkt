@@ -23,6 +23,7 @@ const APP_PORT = 8099;
 const API_PORT = 54329;
 const APP_URL = `http://localhost:${APP_PORT}`;
 const PASSWORD = 'correct-horse-42';
+const NEW_PASSWORD = 'battery-staple-77';
 
 const MIME = {
   '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json',
@@ -217,6 +218,7 @@ step('the assign-workout modal validates and then saves the workout', async () =
   await text(trainer, 'Give the workout a title.');
   await tid(trainer, 'workout-title-input').fill('Lower body strength');
   await tid(trainer, 'workout-notes-input').fill('Back squat 5 x 5\nRomanian deadlift 3 x 8');
+  await trainer.waitForTimeout(600); // let the open animation finish
   await shot(trainer, '05-assign-workout-modal');
   await tid(trainer, 'assign-submit-button').click();
   await visible(trainer, 'dashboard-notice');
@@ -330,14 +332,23 @@ step('the account screen shows the plan and an upgrade button on the web', async
   await shot(trainer, '12-account-trainer');
 });
 
-step('a paid subscription lifts the limit', async () => {
+step('returning from checkout waits for the payment to register, then shows Pro', async () => {
+  await trainer.goto(`${APP_URL}/account?billing=success`);
+  await visible(trainer, 'billing-pending');
+  assert.equal((await tid(trainer, 'plan-name').innerText()).trim(), 'Free');
+
+  // The webhook lands a moment later; the screen picks it up without a reload.
   await db.query("insert into public.subscriptions (user_id, status, current_period_end) values ($1, 'active', now() + interval '30 days')", [trainerId]);
-  await trainer.reload();
-  await visible(trainer, 'account-screen');
-  await trainer.getByTestId('plan-name').waitFor({ state: 'visible' });
-  await trainer.waitForFunction(() => document.querySelector('[data-testid="plan-name"]')?.textContent?.trim() === 'Pro');
+  await visible(trainer, 'billing-success');
+  assert.equal((await tid(trainer, 'plan-name').innerText()).trim(), 'Pro');
   await visible(trainer, 'manage-billing');
+  assert.equal(await trainer.getByTestId('upgrade-button').count(), 0);
+  await text(trainer, 'Unlimited clients.');
+  await shot(trainer, '12b-account-pro');
+
   await db.query('delete from public.subscriptions where user_id = $1', [trainerId]);
+  await trainer.goto(`${APP_URL}/account`);
+  await visible(trainer, 'account-screen');
 });
 
 step('renaming yourself is saved', async () => {
@@ -371,14 +382,69 @@ step('signing back in routes a trainer to the trainer dashboard', async () => {
   await text(trainer, 'Cleo Client');
 });
 
+step('password reset works, but only on the device that requested it', async () => {
+  const visitor = await newUser();
+  await visitor.goto(APP_URL);
+  await visible(visitor, 'sign-in-screen');
+  await tid(visitor, 'go-to-forgot-password').click();
+  await visible(visitor, 'forgot-password-screen');
+
+  // An unknown address gets the same answer and produces no reset code.
+  await tid(visitor, 'email-input').fill('nobody@example.com');
+  await tid(visitor, 'send-reset-button').click();
+  await text(visitor, 'If an account exists for that address');
+  assert.equal(emulator.state.lastRecoveryCode, null);
+
+  await visitor.goto(`${APP_URL}/forgot-password`);
+  await visible(visitor, 'forgot-password-screen');
+  await tid(visitor, 'email-input').fill('tara@example.com');
+  await tid(visitor, 'send-reset-button').click();
+  await text(visitor, 'If an account exists for that address');
+  const code = emulator.state.lastRecoveryCode;
+  assert.ok(code, 'a reset code should have been issued');
+
+  // Someone who intercepts the emailed link cannot use it from their own browser.
+  expectingFailures = true;
+  const thief = await newUser();
+  await thief.goto(`${APP_URL}/reset-password?code=${code}`);
+  await visible(thief, 'sign-in-screen');
+  assert.equal(await thief.getByTestId('reset-password-screen').count(), 0);
+  await thief.context().close();
+  expectingFailures = false;
+
+  await visitor.goto(`${APP_URL}/reset-password?code=${code}`);
+  await visible(visitor, 'reset-password-screen');
+  await shot(visitor, '16-reset-password');
+  await tid(visitor, 'password-input').fill('weak');
+  await tid(visitor, 'save-password-button').click();
+  await text(visitor, 'Use at least 10 characters.');
+  await tid(visitor, 'password-input').fill(NEW_PASSWORD);
+  await tid(visitor, 'save-password-button').click();
+  await visible(visitor, 'trainer-dashboard');
+
+  // The old password no longer works; the new one does.
+  await tid(visitor, 'account-button').click();
+  await tid(visitor, 'sign-out-button').click();
+  expectingFailures = true;
+  await signIn(visitor, 'tara@example.com', PASSWORD);
+  await text(visitor, 'Incorrect email or password.');
+  expectingFailures = false;
+  await signIn(visitor, 'tara@example.com', NEW_PASSWORD);
+  await visible(visitor, 'trainer-dashboard');
+  await visitor.context().close();
+});
+
 step('a client can delete their account, which removes their data', async () => {
   await client.goto(`${APP_URL}/account`);
   await visible(client, 'account-screen');
+  // Opening the page directly must still pre-fill the form from the profile.
+  assert.equal(await tid(client, 'account-name-input').inputValue(), 'Cleo Client');
   await shot(client, '13-account-client');
   await tid(client, 'delete-account-button').click();
   await visible(client, 'confirm-dialog');
   assert.equal(await tid(client, 'confirm-dialog-confirm').isDisabled(), true);
   await tid(client, 'delete-confirm-input').fill('delete');
+  await client.waitForTimeout(600); // let the open animation finish
   await shot(client, '14-delete-dialog');
   await tid(client, 'confirm-dialog-confirm').click();
   await visible(client, 'sign-in-screen');
@@ -389,7 +455,7 @@ step('a client can delete their account, which removes their data', async () => 
 step('the layout holds up on a desktop-sized window', async () => {
   const desktop = await newUser({ width: 1440, height: 900 });
   await desktop.goto(APP_URL);
-  await signIn(desktop, 'tara@example.com');
+  await signIn(desktop, 'tara@example.com', NEW_PASSWORD);
   await visible(desktop, 'trainer-dashboard');
   await text(desktop, 'Second Client');
   await shot(desktop, '15-desktop-trainer');

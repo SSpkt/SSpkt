@@ -192,6 +192,7 @@ describe('join_trainer', () => {
 
     await admin(db, "update private.join_attempts set attempted_at = now() - interval '2 hours' where user_id = $1", [guesser]);
     assert.equal((await rpc(guesser, 'select public.join_trainer($1)', [codeB])).ok, true);
+    assert.equal((await one('select count(*)::int as n from private.join_attempts where user_id = $1', [guesser])).n, 0);
   });
 
   it('enforces the free-plan client limit and lifts it for paying trainers', async () => {
@@ -257,12 +258,12 @@ describe('workouts', () => {
   });
 
   it('a trainer cannot forge the trainer_id of a workout', async () => {
-    await denied(
-      trainerA,
-      "insert into public.workouts (trainer_id, client_id, title) values ($1, $2, 'x')",
-      [trainerB, c3],
-      /row-level security/,
-    );
+    const insert = "insert into public.workouts (trainer_id, client_id, title) values ($1, $2, 'x')";
+    // Attributed to another trainer, for that trainer's client...
+    await denied(trainerA, insert, [trainerB, c3], /row-level security/);
+    // ...and for the caller's own client, which only the trainer_id check can stop.
+    await denied(trainerA, insert, [trainerB, c1], /row-level security/);
+    await denied(trainerA, insert, [c1, c1], /row-level security/);
   });
 
   it('a client cannot create workouts, even for themselves', async () => {
@@ -371,18 +372,44 @@ describe('relationship management', () => {
     const trainer = await signUp(db, 'rm-trainer@gym.test', { role: 'trainer' });
     const client = await signUp(db, 'rm-client@gym.test', {});
     const { invite_code: code } = await one('select invite_code from public.profiles where id = $1', [trainer]);
-    await rpc(client, 'select public.join_trainer($1)', [code]);
+    assert.equal((await rpc(client, 'select public.join_trainer($1)', [code])).ok, true);
+
+    const workout = (await query(
+      trainer,
+      "insert into public.workouts (trainer_id, client_id, title) values ($1, $2, 'Shared') returning id",
+      [trainer, client],
+    ))[0];
 
     assert.equal(await rpc(trainer, 'select public.remove_client($1)', [client]), true);
     assert.deepEqual((await query(client, 'select id from public.profiles')).map((r) => r.id), [client]);
     assert.deepEqual((await query(trainer, 'select id from public.profiles')).map((r) => r.id), [trainer]);
+
+    // The client keeps their history; the former trainer can no longer read or change it.
+    assert.equal((await query(client, 'select id from public.workouts')).length, 1);
+    assert.equal((await query(trainer, 'select id from public.workouts')).length, 0);
+    await query(trainer, "update public.workouts set title = 'Tampered' where id = $1", [workout.id]);
+    await query(trainer, 'delete from public.workouts where id = $1', [workout.id]);
+    assert.equal((await one('select title from public.workouts where id = $1', [workout.id])).title, 'Shared');
+
+    // Rejoining restores the trainer's access.
+    assert.equal((await rpc(client, 'select public.join_trainer($1)', [code])).ok, true);
+    assert.equal((await query(trainer, 'select id from public.workouts')).length, 1);
   });
 
-  it('a client can leave their trainer', async () => {
+  it('a client can leave their trainer, which also ends the trainer\'s access to their workouts', async () => {
+    const trainer = await signUp(db, 'left-trainer@gym.test', { role: 'trainer' });
     const client = await signUp(db, 'leaver@gym.test', {});
-    await rpc(client, 'select public.join_trainer($1)', [codeB]);
+    const { invite_code: code } = await one('select invite_code from public.profiles where id = $1', [trainer]);
+    assert.equal((await rpc(client, 'select public.join_trainer($1)', [code])).ok, true);
+    await query(trainer, "insert into public.workouts (trainer_id, client_id, title) values ($1, $2, 'Before leaving')", [trainer, client]);
+    assert.equal((await query(trainer, 'select id from public.workouts')).length, 1);
+
     await query(client, 'select public.leave_trainer()');
+
     assert.equal((await one('select trainer_id from public.profiles where id = $1', [client])).trainer_id, null);
+    assert.equal((await query(trainer, 'select id from public.workouts')).length, 0);
+    assert.equal((await query(trainer, 'select id from public.profiles where id = $1', [client])).length, 0);
+    assert.equal((await query(client, 'select id from public.workouts')).length, 1);
   });
 
   it('regenerating an invite code invalidates the old one, and only trainers can do it', async () => {
@@ -408,7 +435,7 @@ describe('account deletion', () => {
     const trainer = await signUp(db, 'bye-trainer@gym.test', { role: 'trainer' });
     const client = await signUp(db, 'bye-client@gym.test', {});
     const { invite_code: code } = await one('select invite_code from public.profiles where id = $1', [trainer]);
-    await rpc(client, 'select public.join_trainer($1)', [code]);
+    assert.equal((await rpc(client, 'select public.join_trainer($1)', [code])).ok, true);
     await query(trainer, "insert into public.workouts (trainer_id, client_id, title) values ($1, $2, 'w')", [trainer, client]);
     const before = (await one('select count(*)::int as n from auth.users')).n;
 

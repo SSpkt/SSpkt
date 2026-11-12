@@ -1,0 +1,8 @@
+# Function settings picked up by `supabase functions deploy`.
+
+[functions.billing-session]
+verify_jwt = true
+
+# Stripe cannot present a Supabase JWT. The function verifies Stripe's signature instead.
+[functions.stripe-webhook]
+verify_jwt = false

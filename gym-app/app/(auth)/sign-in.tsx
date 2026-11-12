@@ -59,7 +59,7 @@ export default function SignIn() {
       />
       <Button label="Sign in" onPress={() => void submit()} loading={loading} testID="sign-in-button" />
       <View style={authStyles.linkRow}>
-        <Link replace href="/(auth)/forgot-password" style={authStyles.link}>
+        <Link replace href="/(auth)/forgot-password" style={authStyles.link} testID="go-to-forgot-password">
           Forgot password?
         </Link>
       </View>

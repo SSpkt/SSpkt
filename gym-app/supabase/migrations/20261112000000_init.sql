@@ -117,6 +117,12 @@ returns boolean language sql stable security definer set search_path = '' as $$
   );
 $$;
 
+create or replace function private.my_client_ids()
+returns setof uuid language sql stable security definer set search_path = '' as $$
+  select id from public.profiles
+  where trainer_id = (select auth.uid()) and role::text = 'client';
+$$;
+
 create or replace function private.has_pro(trainer uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
   select exists (
@@ -246,6 +252,7 @@ begin
     return jsonb_build_object('ok', false, 'error', 'ALREADY_LINKED');
   end if;
 
+  delete from private.join_attempts where user_id = v_uid and attempted_at <= now() - interval '1 hour';
   select count(*) into v_attempts from private.join_attempts
   where user_id = v_uid and attempted_at > now() - interval '1 hour';
   if v_attempts >= 10 then
@@ -392,9 +399,14 @@ create policy profiles_update_own on public.profiles
   using (id = (select auth.uid()))
   with check (id = (select auth.uid()));
 
+-- A trainer's access to a client's workouts lasts only while the two are linked. Because
+-- UPDATE and DELETE can only touch rows the caller can SELECT, unlinking cuts those off too.
 create policy workouts_select_participant on public.workouts
   for select to authenticated
-  using (trainer_id = (select auth.uid()) or client_id = (select auth.uid()));
+  using (
+    client_id = (select auth.uid())
+    or (trainer_id = (select auth.uid()) and client_id in (select private.my_client_ids()))
+  );
 
 create policy workouts_insert_trainer on public.workouts
   for insert to authenticated
@@ -443,7 +455,9 @@ grant all on public.profiles, public.workouts, public.subscriptions to service_r
 revoke all on schema private from public, anon;
 grant usage on schema private to authenticated;
 revoke all on all functions in schema private from public, anon, authenticated;
-grant execute on function private.is_trainer(), private.my_trainer_id(), private.is_my_client(uuid) to authenticated;
+grant execute on function
+  private.is_trainer(), private.my_trainer_id(), private.is_my_client(uuid), private.my_client_ids()
+to authenticated;
 
 revoke all on function
   public.handle_new_user(),

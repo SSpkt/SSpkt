@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
   list: { gap: space.md },
   workout: { gap: space.md },
   workoutHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md },
-  workoutTitleWrap: { flex: 1, gap: space.sm },
+  workoutTitleWrap: { flex: 1, gap: space.sm, alignItems: 'flex-start' },
   workoutTitle: { ...type.heading, color: colors.text },
   notes: { ...type.body, color: colors.textMuted },
   dangerZone: { marginTop: space.xxl },

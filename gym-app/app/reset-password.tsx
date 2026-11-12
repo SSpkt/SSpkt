@@ -44,7 +44,7 @@ export default function ResetPassword() {
         onSubmitEditing={() => void submit()}
         testID="password-input"
       />
-      <Button label="Save password" onPress={() => void submit()} loading={loading} />
+      <Button label="Save password" onPress={() => void submit()} loading={loading} testID="save-password-button" />
       <Button label="Cancel" variant="ghost" onPress={() => void signOut()} />
     </AuthScaffold>
   );

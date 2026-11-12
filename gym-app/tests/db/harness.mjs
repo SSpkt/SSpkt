@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const migrationsDir = join(here, '..', '..', 'supabase', 'migrations');
+// MIGRATIONS_DIR lets a mutation check point the suite at a deliberately weakened copy.
+const migrationsDir = process.env.MIGRATIONS_DIR ?? join(here, '..', '..', 'supabase', 'migrations');
 
 export async function createDatabase() {
   const db = new PGlite();

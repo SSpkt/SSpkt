@@ -537,6 +537,6 @@ const styles = StyleSheet.create({
   },
   overline: { ...type.overline, color: colors.textFaint },
 
-  badge: { paddingHorizontal: space.sm, paddingVertical: 3, borderRadius: radius.pill, alignSelf: 'flex-start' },
+  badge: { paddingHorizontal: space.sm, paddingVertical: 3, borderRadius: radius.pill },
   badgeText: { ...type.caption, fontWeight: '700' },
 });

@@ -18,7 +18,7 @@
     "android": {
       "package": "com.example.trainerops",
       "adaptiveIcon": {
-        "backgroundColor": "#0A0C0F",
+        "backgroundColor": "#C8F250",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },

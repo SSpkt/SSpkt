@@ -51,7 +51,7 @@ export default function ForgotPassword() {
             onSubmitEditing={() => void submit()}
             testID="email-input"
           />
-          <Button label="Send reset link" onPress={() => void submit()} loading={loading} />
+          <Button label="Send reset link" onPress={() => void submit()} loading={loading} testID="send-reset-button" />
         </>
       )}
       <Link replace href="/(auth)/sign-in" style={[authStyles.link, { textAlign: 'center' }]}>

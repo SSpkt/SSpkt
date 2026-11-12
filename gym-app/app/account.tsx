@@ -1,11 +1,13 @@
 import Constants from 'expo-constants';
-import { useCallback, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { Header } from '@/components/Header';
 import { ConfirmDialog } from '@/components/Sheet';
-import { Badge, Banner, Button, Card, Screen, SectionTitle, TextField } from '@/components/ui';
+import { Badge, Banner, Button, Card, LoadingScreen, Screen, SectionTitle, TextField } from '@/components/ui';
 import { createBillingSession, deleteAccount, fetchPlan, fetchTrainerName, leaveTrainer, regenerateInviteCode, updateName } from '@/lib/api';
+import type { Profile } from '@/lib/database.types';
 import { friendlyError } from '@/lib/errors';
 import { useAsyncData } from '@/lib/useAsyncData';
 import { limits, validateName } from '@/lib/validation';
@@ -20,9 +22,16 @@ const PRO_PRICE_LABEL = process.env.EXPO_PUBLIC_PRO_PRICE_LABEL;
 type Dialog = 'leave' | 'regenerate' | 'delete' | null;
 
 export default function Account() {
-  const { profile, session, refreshProfile, signOut } = useAuth();
-  const isTrainer = profile?.role === 'trainer';
-  const trainerId = profile?.trainer_id ?? null;
+  const { profile } = useAuth();
+  // The form below seeds its fields from the profile, so it must not mount before it exists.
+  if (!profile) return <LoadingScreen />;
+  return <AccountContent profile={profile} />;
+}
+
+function AccountContent({ profile }: { profile: Profile }) {
+  const { session, refreshProfile, signOut } = useAuth();
+  const isTrainer = profile.role === 'trainer';
+  const trainerId = profile.trainer_id;
 
   const loadDetails = useCallback(async () => {
     const [plan, trainerName] = await Promise.all([
@@ -34,7 +43,7 @@ export default function Account() {
 
   const { data, error, setError, reload } = useAsyncData(loadDetails, 'Could not load your account details.');
 
-  const [name, setName] = useState(profile?.full_name ?? '');
+  const [name, setName] = useState(profile.full_name);
   const [savingName, setSavingName] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -43,8 +52,19 @@ export default function Account() {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [signingOut, setSigningOut] = useState(false);
 
+  // Stripe sends the customer back here with ?billing=success, usually a moment before its
+  // webhook has updated the plan, so keep checking for a few seconds.
+  const { billing } = useLocalSearchParams<{ billing?: string }>();
+  const returnedFromCheckout = billing === 'success';
+  const currentPlan = data?.plan?.plan;
+  useEffect(() => {
+    if (!returnedFromCheckout || currentPlan !== 'free') return;
+    const timers = [2000, 5000, 10000, 20000].map((delay) => setTimeout(() => void reload(), delay));
+    return () => timers.forEach(clearTimeout);
+  }, [returnedFromCheckout, currentPlan, reload]);
+
   const nameError = validateName(name);
-  const nameChanged = name.trim() !== (profile?.full_name ?? '');
+  const nameChanged = name.trim() !== profile.full_name;
   const plan = data?.plan ?? null;
 
   async function run(action: () => Promise<void>, failure: string, success?: string) {
@@ -64,7 +84,7 @@ export default function Account() {
   }
 
   async function saveName() {
-    if (!profile || nameError) return;
+    if (nameError) return;
     setSavingName(true);
     setError(null);
     setNotice(null);
@@ -99,6 +119,12 @@ export default function Account() {
 
         {error ? <Banner message={error} actionLabel="Retry" onAction={() => void reload()} testID="account-error" /> : null}
         {notice ? <Banner tone="success" message={notice} testID="account-notice" /> : null}
+        {returnedFromCheckout && currentPlan === 'free' ? (
+          <Banner tone="info" message="Payment received. Your plan will update in a moment." testID="billing-pending" />
+        ) : null}
+        {returnedFromCheckout && currentPlan === 'pro' ? (
+          <Banner tone="success" message="You're on Pro. Thanks for subscribing." testID="billing-success" />
+        ) : null}
 
         <Card style={styles.card}>
           <View style={styles.row}>
@@ -248,7 +274,7 @@ export default function Account() {
             ? 'This permanently deletes your account, your client links and every workout you assigned. It cannot be undone.'
             : 'This permanently deletes your account and your workout history. It cannot be undone.'
         }
-        confirmLabel="Delete forever"
+        confirmLabel="Delete"
         destructive
         loading={working}
         confirmDisabled={deleteConfirmation.trim().toUpperCase() !== 'DELETE'}

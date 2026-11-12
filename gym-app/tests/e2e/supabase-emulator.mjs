@@ -3,7 +3,7 @@
 // runs as the `authenticated` or `anon` role with the caller's JWT claims, so the browser
 // tests exercise the real row-level security. It implements just the subset of the Supabase
 // HTTP API that the app uses; it is not a general-purpose emulator.
-import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 
 import { createDatabase } from '../db/harness.mjs';
@@ -43,8 +43,12 @@ export async function startEmulator({ port = 54321 } = {}) {
   const db = await createDatabase();
   const passwords = new Map(); // user id -> { salt, hash }
   const refreshTokens = new Map(); // refresh token -> user id
-  /** Tests can flip this to make every REST call fail, simulating an outage. */
-  const state = { failRest: false };
+  const recoveries = new Map(); // one-time code -> { userId, challenge, method }
+  /**
+   * failRest: tests flip this to make every REST call fail, simulating an outage.
+   * lastRecoveryCode: stands in for the link in the password-reset email.
+   */
+  const state = { failRest: false, lastRecoveryCode: null };
 
   const hashPassword = (password, salt) => scryptSync(password, salt, 32);
 
@@ -120,6 +124,37 @@ export async function startEmulator({ port = 54321 } = {}) {
       if (!userId) throw authError(400, 'refresh_token_not_found', 'Invalid Refresh Token');
       refreshTokens.delete(body.refresh_token);
       return [200, await issueSession(userId)];
+    }
+
+    if (method === 'POST' && path === '/recover') {
+      const { rows } = await db.query('select id from auth.users where email = $1', [String(body.email ?? '').toLowerCase()]);
+      // Same response whether or not the address exists, like the real service.
+      if (rows[0] && body.code_challenge) {
+        const code = randomUUID();
+        recoveries.set(code, { userId: rows[0].id, challenge: body.code_challenge, method: body.code_challenge_method });
+        state.lastRecoveryCode = code;
+      }
+      return [200, {}];
+    }
+
+    if (method === 'POST' && path === '/token' && query.get('grant_type') === 'pkce') {
+      const flow = recoveries.get(body.auth_code);
+      if (!flow) throw authError(404, 'flow_state_not_found', 'Flow state not found');
+      const verifier = String(body.code_verifier ?? '');
+      const presented = flow.method === 's256' ? createHash('sha256').update(verifier).digest('base64url') : verifier;
+      if (presented !== flow.challenge) throw authError(400, 'bad_code_verifier', 'Code verifier does not match');
+      recoveries.delete(body.auth_code);
+      return [200, await issueSession(flow.userId)];
+    }
+
+    if (method === 'PUT' && path === '/user') {
+      if (!claims) throw authError(401, 'no_authorization', 'Missing token');
+      if (typeof body.password === 'string') {
+        if (body.password.length < 6) throw authError(422, 'weak_password', 'Password too short');
+        const salt = randomBytes(16);
+        passwords.set(claims.sub, { salt, hash: hashPassword(body.password, salt) });
+      }
+      return [200, await getUser(claims.sub)];
     }
 
     if (method === 'GET' && path === '/user') {
@@ -249,7 +284,7 @@ export async function startEmulator({ port = 54321 } = {}) {
     const cors = {
       'access-control-allow-origin': req.headers.origin ?? '*',
       'access-control-allow-headers': req.headers['access-control-request-headers'] ?? '*',
-      'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+      'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
       'access-control-max-age': '600',
       'x-supabase-api-version': '2024-01-01',
     };
