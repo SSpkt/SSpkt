@@ -48,7 +48,8 @@
     "test:db": "node --test tests/db/security.test.mjs",
     "test:e2e": "node tests/e2e/run.mjs",
     "build:web": "expo export --platform web",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "demo": "node scripts/demo.mjs"
   },
   "private": true,
   "jest": {
