@@ -50,3 +50,4 @@ example
 # test output
 test-results/
 playwright-report/
+dist-e2e/

@@ -4,11 +4,11 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
-    "@react-native-async-storage/async-storage": "2.2.0",
     "@supabase/supabase-js": "^2.119.0",
     "expo": "~58.0.24",
     "expo-clipboard": "~58.0.4",
     "expo-constants": "~58.0.16",
+    "expo-crypto": "~58.0.8",
     "expo-font": "~58.0.12",
     "expo-linking": "~58.0.17",
     "expo-router": "~58.0.31",
@@ -28,15 +28,24 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.16",
     "@types/react": "~19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~58.0.4",
+    "playwright": "^1.63.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:db",
+    "test:unit": "jest",
+    "test:db": "node --test tests/db/security.test.mjs",
+    "test:e2e": "node tests/e2e/run.mjs",
+    "build:web": "expo export --platform web",
+    "check": "npm run typecheck && npm run lint && npm test"
   },
   "private": true
 }
