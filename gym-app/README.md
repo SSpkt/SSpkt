@@ -208,6 +208,8 @@ your own origin and your Supabase URL.
 **Before taking real customers**: publish a privacy policy and terms and set
 `EXPO_PUBLIC_PRIVACY_URL` / `EXPO_PUBLIC_TERMS_URL`; you are storing names, emails and
 fitness notes, so check what your local data-protection law requires of you.
+`npm run check:release` confirms these, the Supabase URL and a non-secret key are set;
+EAS runs the same check before every `production` build and stops it if anything is missing.
 
 ## Known limits
 

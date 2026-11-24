@@ -3,10 +3,25 @@ import { supabase } from './supabase';
 
 export type ClientSummary = Profile & { total: number; completed: number };
 
+/**
+ * Every profile column the signed-in role may read. invite_code is deliberately absent:
+ * the database withholds it so a client can't copy their trainer's code, and a trainer
+ * reads their own through the my_invite_code RPC instead.
+ */
+const PROFILE_COLUMNS = 'id, email, full_name, role, trainer_id, created_at, updated_at';
+
 export async function fetchProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+  const { data, error } = await supabase.from('profiles').select(PROFILE_COLUMNS).eq('id', userId).maybeSingle();
   if (error) throw error;
-  return data;
+  if (!data) return null;
+  return { ...data, invite_code: data.role === 'trainer' ? await fetchInviteCode() : null };
+}
+
+/** The signed-in trainer's own invite code (null for clients). */
+export async function fetchInviteCode(): Promise<string | null> {
+  const { data, error } = await supabase.rpc('my_invite_code');
+  if (error) throw error;
+  return data ?? null;
 }
 
 export async function updateName(userId: string, fullName: string): Promise<void> {
@@ -17,7 +32,7 @@ export async function updateName(userId: string, fullName: string): Promise<void
 /** A trainer's clients with their workout progress. RLS limits both queries to the caller's own. */
 export async function fetchClients(trainerId: string): Promise<ClientSummary[]> {
   const [clients, workouts] = await Promise.all([
-    supabase.from('profiles').select('*').eq('role', 'client').eq('trainer_id', trainerId).order('full_name'),
+    supabase.from('profiles').select(PROFILE_COLUMNS).eq('role', 'client').eq('trainer_id', trainerId).order('full_name'),
     supabase.from('workouts').select('client_id, is_completed').eq('trainer_id', trainerId),
   ]);
   if (clients.error) throw clients.error;
@@ -30,14 +45,18 @@ export async function fetchClients(trainerId: string): Promise<ClientSummary[]> 
     if (workout.is_completed) entry.completed += 1;
     progress.set(workout.client_id, entry);
   }
-  return clients.data.map((client) => ({ ...client, ...(progress.get(client.id) ?? { total: 0, completed: 0 }) }));
+  return clients.data.map((client) => ({
+    ...client,
+    invite_code: null,
+    ...(progress.get(client.id) ?? { total: 0, completed: 0 }),
+  }));
 }
 
 export async function fetchClient(clientId: string): Promise<Profile | null> {
   const { data, error } = await supabase
-    .from('profiles').select('*').eq('id', clientId).eq('role', 'client').maybeSingle();
+    .from('profiles').select(PROFILE_COLUMNS).eq('id', clientId).eq('role', 'client').maybeSingle();
   if (error) throw error;
-  return data;
+  return data ? { ...data, invite_code: null } : null;
 }
 
 export async function fetchTrainerName(trainerId: string): Promise<string | null> {

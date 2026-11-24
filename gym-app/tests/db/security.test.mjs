@@ -88,6 +88,7 @@ describe('anonymous callers', () => {
       `select public.remove_client('${RANDOM_UUID}')`,
       'select public.regenerate_invite_code()',
       'select public.my_plan()',
+      'select public.my_invite_code()',
       'select public.delete_my_account()',
       'select private.is_trainer()',
     ];
@@ -116,6 +117,19 @@ describe('profiles: tenant isolation', () => {
   it('an unlinked client sees only themselves', async () => {
     const rows = await query(c4, 'select id from public.profiles');
     assert.deepEqual(rows.map((r) => r.id), [c4]);
+  });
+
+  it("a client cannot read their trainer's invite code, directly or via select *", async () => {
+    await denied(c1, 'select invite_code from public.profiles where id = $1', [trainerA], /permission denied/);
+    await denied(c1, 'select * from public.profiles where id = $1', [trainerA], /permission denied/);
+    const [trainer] = await query(c1, 'select id, full_name, email from public.profiles where id = $1', [trainerA]);
+    assert.equal(trainer.full_name, 'Trainer A');
+  });
+
+  it('only a trainer gets an invite code from my_invite_code, and only their own', async () => {
+    assert.equal(await rpc(trainerA, 'select public.my_invite_code()'), codeA);
+    assert.equal(await rpc(trainerB, 'select public.my_invite_code()'), codeB);
+    assert.equal(await rpc(c1, 'select public.my_invite_code()'), null);
   });
 
   it("a user registering as a trainer gains no access to anyone else's data", async () => {

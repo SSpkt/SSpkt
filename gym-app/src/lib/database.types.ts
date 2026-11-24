@@ -75,6 +75,7 @@ export type Database = {
       leave_trainer: { Args: Record<never, never>; Returns: undefined };
       remove_client: { Args: { p_client_id: string }; Returns: boolean };
       regenerate_invite_code: { Args: Record<never, never>; Returns: string };
+      my_invite_code: { Args: Record<never, never>; Returns: string | null };
       my_plan: { Args: Record<never, never>; Returns: Plan };
       delete_my_account: { Args: Record<never, never>; Returns: undefined };
     };
